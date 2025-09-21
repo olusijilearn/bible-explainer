@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Bible Verse Explainer • Gemini 2.5</title>
+  <style>
+    :root{
+      --bg:#f7f7f8; --text:#1e1e1e; --card:#fff; --border:#e0e0e0;
+      --muted:#666; --accent:#10a37f; --accent-hover:#0e8f6f; --note-bg:#fafafa;
+      --yellow:#fff176; --col-min:300px; /* tweak this if you want wider/narrower columns */
+    }
+    body {margin:0;font:15px system-ui;background:var(--bg);color:var(--text)}
+    .app {display:grid;grid-template-columns:260px 1fr;gap:12px;min-height:100vh;padding:12px}
+
+    .panel {
+      background:var(--card); border:1px solid var(--border); border-radius:12px;
+      padding:12px; display:flex; flex-direction:column; min-height:0;
+    }
+    select,input,button,textarea {
+      width:100%; margin:6px 0; padding:10px; border-radius:8px;
+      border:1px solid #d0d0d0; background:#fff; color:var(--text); font:14px system-ui;
+    }
+    button {cursor:pointer; font-weight:700; background:var(--accent); color:#fff; border:0}
+    button:hover{background:var(--accent-hover)}
+    .versebox {margin:8px 0; padding:8px; border:1px dashed #ccc; border-radius:8px; background:#fafafa}
+    h2 {margin:0 0 8px 0; color:var(--accent); font-size:16px}
+    .toolbar {display:flex; gap:8px; flex-wrap:wrap}
+    .muted {color:var(--muted); font-size:12px}
+
+    /* Right side: horizontal strip of columns (5 total). We’ve reduced min width so 4 usually fit on a laptop. */
+    .columns-wrap {
+      overflow-x:auto; overflow-y:hidden;
+      display:flex; gap:12px; align-items:stretch; padding-bottom:6px;
+      scroll-snap-type:x proximity;
+    }
+    .col {
+      min-width: var(--col-min);
+      display:flex; flex-direction:column; min-height:0;
+      background:var(--card); border:1px solid var(--border); border-radius:12px; padding:12px;
+      scroll-snap-align:start;
+    }
+    .col h2 {margin:0 0 8px 0}
+    .output {
+      flex:1; overflow:auto; padding:10px; border:1px solid #eee; border-radius:8px; background:#fff;
+      max-height: calc(100vh - 240px);
+    }
+
+    /* Highlighted phrases */
+    mark.hl { background: var(--yellow); padding:0 .08em; border-radius:2px }
+    mark.hl:hover { outline:1px dashed #f2c200; cursor:pointer }
+
+    /* Notes column */
+    .notes-composer {
+      position: sticky; top: 0; z-index: 1;
+      background:var(--card); padding-bottom:8px; border-bottom:1px solid var(--border);
+      margin-bottom:8px;
+    }
+    #notes-textarea { height: 120px; resize: vertical; }
+    .notes-list {
+      list-style: none; margin:0; padding:0; border:1px solid #eee; border-radius:8px;
+      background:var(--note-bg); overflow:auto; max-height: calc(100vh - 340px);
+    }
+    .notes-list li {
+      display:flex; gap:8px; align-items:flex-start; padding:10px; border-bottom:1px dashed #e7e7e7;
+    }
+    .notes-list li:last-child { border-bottom:0 }
+    .note-num { font-weight:700; min-width:28px; color:#333 }
+    .note-text { flex:1; white-space:pre-wrap; }
+    .note-actions { display:flex; gap:6px }
+    .btn-x, .btn-edit, .btn-save {
+      background:#f0f0f0; color:#333; border:1px solid #ddd; border-radius:6px; padding:0 8px; height:28px; line-height:26px; cursor:pointer
+    }
+    .btn-x:hover, .btn-edit:hover, .btn-save:hover { background:#e9e9e9 }
+    .edit-input { width:100%; padding:6px 8px; border:1px solid #d0d0d0; border-radius:6px; background:#fff; }
+  </style>
+</head>
+<body>
+<div class="app">
+  <!-- LEFT: controls -->
+  <section class="panel">
+    <h2>Bible Verse Explainer</h2>
+    <label>Book</label>
+    <select id="book"></select>
+    <label>Chapter</label>
+    <select id="chapter"></select>
+    <label>Verse</label>
+    <select id="verse"></select>
+    <div class="versebox" id="versePreview">Select a verse…</div>
+
+    <input id="apikey" placeholder="Paste Gemini API key (AIza...)" />
+    <div class="toolbar">
+      <button id="savekey">Save Key</button>
+      <button id="explainBtn">Explain Verse</button>
+    </div>
+
+    <div class="toolbar">
+      <button id="saveJsonBtn">💾 Save Notes</button>
+      <button id="loadJsonBtn">📂 Load Notes File</button>
+      <input type="file" id="loadJsonInput" style="display:none" accept=".json" />
+    </div>
+    <div class="muted">Tip: run a local server to auto-load notes.json at start.</div>
+  </section>
+
+  <!-- RIGHT: horizontally scrollable columns -->
+  <section class="columns-wrap" id="columns">
+    <!-- 1. Revelation -->
+    <div class="col">
+      <h2>Revelation</h2>
+      <div class="output" id="revelation"></div>
+    </div>
+
+    <!-- 2. Notes (immediately after Revelation) -->
+    <div class="col">
+      <h2>Notes</h2>
+      <div class="notes-composer">
+        <textarea id="notes-textarea" placeholder="Write a note…"></textarea>
+        <button id="notes-add">Add</button>
+      </div>
+      <ol class="notes-list" id="notes-list"></ol>
+    </div>
+
+    <!-- 3. Application -->
+    <div class="col">
+      <h2>Application</h2>
+      <div class="output" id="application"></div>
+    </div>
+
+    <!-- 4. Background -->
+    <div class="col">
+      <h2>Background</h2>
+      <div class="output" id="background"></div>
+    </div>
+
+    <!-- 5. Prophetic (still available by horizontal scroll if window is small) -->
+    <div class="col">
+      <h2>Prophetic Declaration</h2>
+      <div class="output" id="prophetic"></div>
+    </div>
+  </section>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+const $$ = s => Array.from(document.querySelectorAll(s));
+const KEY = 'bibleExplainer.geminiKey';
+
+/* ========= API key ========= */
+if (localStorage.getItem(KEY)) $('#apikey').value = '•••••';
+$('#savekey').onclick = () => {
+  const v = $('#apikey').value.trim();
+  if (v.startsWith('AIza')) { localStorage.setItem(KEY, v); $('#apikey').value = '•••••'; alert('Gemini key saved'); }
+  else alert('Invalid Gemini API key');
+};
+
+/* ========= Bible data ========= */
+const CHAPTERS = {'Genesis':50,'Exodus':40,'Leviticus':27,'Numbers':36,'Deuteronomy':34,
+'Joshua':24,'Judges':21,'Ruth':4,'1 Samuel':31,'2 Samuel':24,'1 Kings':22,'2 Kings':25,
+'1 Chronicles':29,'2 Chronicles':36,'Ezra':10,'Nehemiah':13,'Esther':10,'Job':42,'Psalms':150,
+'Proverbs':31,'Ecclesiastes':12,'Song of Solomon':8,'Isaiah':66,'Jeremiah':52,'Lamentations':5,
+'Ezekiel':48,'Daniel':12,'Hosea':14,'Joel':3,'Amos':9,'Obadiah':1,'Jonah':4,'Micah':7,
+'Nahum':3,'Habakkuk':3,'Zephaniah':3,'Haggai':2,'Zechariah':14,'Malachi':4,'Matthew':28,
+'Mark':16,'Luke':24,'John':21,'Acts':28,'Romans':16,'1 Corinthians':16,'2 Corinthians':13,
+'Galatians':6,'Ephesians':6,'Philippians':4,'Colossians':4,'1 Thessalonians':5,'2 Thessalonians':3,
+'1 Timothy':6,'2 Timothy':4,'Titus':3,'Philemon':1,'Hebrews':13,'James':5,'1 Peter':5,
+'2 Peter':3,'1 John':5,'2 John':1,'3 John':1,'Jude':1,'Revelation':22};
+
+const bookSel=$('#book'),chapSel=$('#chapter'),verseSel=$('#verse');
+Object.keys(CHAPTERS).forEach(b=>{const o=document.createElement('option');o.value=o.textContent=b;bookSel.appendChild(o);});
+
+let verses=[];
+function populateChapters(){chapSel.innerHTML='';for(let i=1;i<=CHAPTERS[bookSel.value];i++){const o=document.createElement('option');o.value=o.textContent=i;chapSel.appendChild(o);}}
+async function loadVerses(){
+  const book=bookSel.value, chap=chapSel.value;
+  const r=await fetch(`https://bible-api.com/${encodeURIComponent(book+' '+chap)}?translation=kjv`, {cache:'no-store'});
+  const j=await r.json();
+  verses=j.verses||[];
+  verseSel.innerHTML='';
+  verses.forEach(v=>{const o=document.createElement('option');o.value=o.textContent=v.verse;verseSel.appendChild(o);});
+  updatePreview();
+}
+function updatePreview(){
+  const v=parseInt(verseSel.value||'1',10);
+  const obj=verses.find(x=>x.verse===v);
+  $('#versePreview').innerHTML=obj?`<b>${bookSel.value} ${chapSel.value}:${v}</b><br>${obj.text}`:'No verse';
+}
+bookSel.onchange=()=>{populateChapters();loadVerses();};
+chapSel.onchange=loadVerses;
+verseSel.onchange=updatePreview;
+bookSel.value='Genesis'; populateChapters(); chapSel.value='21'; loadVerses();
+
+/* ========= Notes DB + auto-load notes.json when http(s) ========= */
+let notesDB = {};
+async function tryAutoLoadNotesJSON(){
+  try{
+    const res = await fetch('notes.json', {cache:'no-store'});
+    if(res.ok){
+      const txt = await res.text();
+      const cleaned = (txt.charCodeAt(0)===0xFEFF) ? txt.slice(1) : txt;
+      const data = JSON.parse(cleaned || '{}');
+      if (data && typeof data === 'object') notesDB = data;
+    }
+  }catch(_){}
+}
+tryAutoLoadNotesJSON();
+
+/* ========= Manual load (file:// fallback) ========= */
+$('#loadJsonBtn').onclick = ()=>$('#loadJsonInput').click();
+$('#loadJsonInput').onchange = e=>{
+  const file=e.target.files[0]; if(!file)return;
+  const reader=new FileReader();
+  reader.onload=evt=>{
+    try{
+      let raw = evt.target.result;
+      if (raw.charCodeAt(0) === 0xFEFF) raw = raw.slice(1);
+      const parsed = JSON.parse(raw || '{}');
+      if (!parsed || typeof parsed !== 'object') throw new Error('Top-level JSON must be an object');
+      notesDB = parsed;
+      alert("Notes file loaded! Select a verse to see them.");
+    }catch(err){ alert("Invalid JSON file: " + err.message); }
+  };
+  reader.readAsText(file);
+};
+
+/* ========= Phrase-level highlight ========= */
+function enableSelectionHighlight(container){
+  container.addEventListener('mouseup', ()=>{
+    const sel = window.getSelection();
+    if(!sel || sel.isCollapsed) return;
+
+    const range = sel.getRangeAt(0);
+    // Ensure selection is inside container
+    let n = range.commonAncestorContainer, ok=false;
+    while (n){ if (n===container){ ok=true; break; } n=n.parentNode; }
+    if (!ok) return;
+
+    try{
+      const mark = document.createElement('mark'); mark.className='hl';
+      range.surroundContents(mark);
+      mark.addEventListener('click', e=>{
+        e.stopPropagation();
+        const t = document.createTextNode(mark.textContent);
+        mark.replaceWith(t);
+      });
+      sel.removeAllRanges();
+    }catch{
+      const text = sel.toString();
+      if (!text) return;
+      const html = container.innerHTML;
+      container.innerHTML = html.replace(text, `<mark class="hl">${text}</mark>`);
+      container.querySelectorAll('mark.hl').forEach(m=>{
+        m.addEventListener('click', e=>{
+          e.stopPropagation();
+          const t = document.createTextNode(m.textContent);
+          m.replaceWith(t);
+        });
+      });
+      sel.removeAllRanges();
+    }
+  });
+}
+['#revelation','#application','#background','#prophetic'].forEach(sel=>enableSelectionHighlight($(sel)));
+
+/* ========= Per-verse helpers ========= */
+function refKey(book, chap, verse){ return `${book}_${chap}_${verse}`; }
+function ensureRec(ref){
+  notesDB[ref] = notesDB[ref] || {
+    revelation:'', application:'', background:'', prophetic:'', notes:[]
+  };
+  if (!Array.isArray(notesDB[ref].notes)) notesDB[ref].notes=[];
+}
+
+/* ========= Paint / Save ========= */
+function paintOutputs(ref){
+  const rec = notesDB[ref]; if(!rec) return;
+  $('#revelation').innerHTML = rec.revelation || '';
+  $('#application').innerHTML = rec.application || '';
+  $('#background').innerHTML  = rec.background  || '';
+  $('#prophetic').innerHTML   = rec.prophetic   || '';
+  renderNotes(ref);
+}
+function saveOutputs(ref){
+  ensureRec(ref);
+  notesDB[ref].revelation = $('#revelation').innerHTML;
+  notesDB[ref].application = $('#application').innerHTML;
+  notesDB[ref].background  = $('#background').innerHTML;
+  notesDB[ref].prophetic   = $('#prophetic').innerHTML;
+}
+
+/* ========= Notes UI (one column) ========= */
+function renderNotes(ref){
+  ensureRec(ref);
+  const list = $('#notes-list');
+  list.innerHTML = '';
+  notesDB[ref].notes.forEach((txt, i)=>{
+    const li = document.createElement('li');
+
+    const num = document.createElement('div'); num.className='note-num'; num.textContent = (i+1)+'.';
+    const textDiv = document.createElement('div'); textDiv.className='note-text'; textDiv.textContent = txt;
+
+    const actions = document.createElement('div'); actions.className='note-actions';
+    const editBtn = document.createElement('button'); editBtn.className='btn-edit'; editBtn.textContent='✎';
+    const delBtn  = document.createElement('button'); delBtn.className='btn-x'; delBtn.textContent='×';
+
+    editBtn.onclick = ()=>{
+      const input = document.createElement('input'); input.className='edit-input'; input.value = txt;
+      textDiv.replaceWith(input);
+      editBtn.style.display='none';
+      const saveBtn = document.createElement('button'); saveBtn.className='btn-save'; saveBtn.textContent='Save';
+      actions.insertBefore(saveBtn, delBtn);
+      saveBtn.onclick = ()=>{
+        const v = input.value.trim();
+        notesDB[ref].notes[i] = v;
+        renderNotes(ref);
+      };
+    };
+    delBtn.onclick = ()=>{
+      notesDB[ref].notes.splice(i,1);
+      renderNotes(ref);
+    };
+
+    actions.appendChild(editBtn); actions.appendChild(delBtn);
+    li.appendChild(num); li.appendChild(textDiv); li.appendChild(actions);
+    list.appendChild(li);
+  });
+}
+
+$('#notes-add').onclick = ()=>{
+  const ref = refKey(bookSel.value, chapSel.value, verseSel.value);
+  ensureRec(ref);
+  const v = ($('#notes-textarea').value || '').trim();
+  if(!v) return;
+  notesDB[ref].notes.push(v);
+  $('#notes-textarea').value='';
+  renderNotes(ref);
+};
+
+/* ========= Save all to file ========= */
+$('#saveJsonBtn').onclick = ()=>{
+  const ref = refKey(bookSel.value, chapSel.value, verseSel.value);
+  saveOutputs(ref);
+  const blob = new Blob([JSON.stringify(notesDB, null, 2)], {type:'application/json'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'notes.json'; a.click();
+  URL.revokeObjectURL(url);
+};
+
+/* ========= Gemini call ========= */
+async function callGemini({book, chapter, verse, verseText, contextText}) {
+  const key = localStorage.getItem(KEY);
+  if (!key) throw new Error("Missing Gemini API key");
+
+  const prompt = `
+Explain ${book} ${chapter}:${verse} (KJV: "${verseText}") in Apostle Joshua Selman (Koinonia) style.
+You are to explain Bible verses in the style of Apostle Joshua Selman (Koinonia ministry).
+Focus on revelation, not commentary. Use short, weighty, prophetic sentences.
+Make each line carry spiritual substance, not filler.
+Break content into clear sections with these exact Markdown headings:
+## Revelation
+## Background
+## Application
+## Prophetic Declaration
+Under 'Revelation', emphasize mysteries hidden in the verse. Use Hebrew/Greek only if it adds weight. Link to other bible verse KJV that aligns with your revelaton.  
+When you link go other bible verses, output the bible verse in Kjv
+Never repeat phrases unnecessarily.
+Every paragraph must sound like a preacher unveiling mysteries of the Spirit.
+End with a powerful one-sentence prophetic prayer starting with 'Prayer:'.
+Context: ${contextText}
+`;
+  const body = { contents: [{ role: "user", parts: [{ text: prompt }] }] };
+  const res = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent?key=${key}`,
+    { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify(body) }
+  );
+  if (!res.ok) throw new Error(await res.text());
+  const data = await res.json();
+  return data.candidates?.[0]?.content?.parts?.[0]?.text || "";
+}
+
+function cleanModelText(s){ if(!s) return ''; return s.replace(/^```[a-zA-Z]*\n?/,'').replace(/\n?```$/,'').trim(); }
+function splitIntoSections(md){
+  const out = { Revelation:'', Application:'', Background:'', 'Prophetic Declaration':'' };
+  const cleaned = cleanModelText(md);
+  try{
+    const j = JSON.parse(cleaned);
+    if (j && typeof j === 'object') {
+      if (j.revelation) out.Revelation = String(j.revelation);
+      if (j.application) out.Application = String(j.application);
+      if (j.background) out.Background = String(j.background);
+      if (j.prophetic || j['prophetic declaration']) out['Prophetic Declaration'] = String(j.prophetic || j['prophetic declaration']);
+      return out;
+    }
+  }catch{}
+  const lines = cleaned.split(/\r?\n/);
+  let current = null;
+  for (const line of lines){
+    const m = /^##\s*(.+?)\s*$/.exec(line);
+    if (m){
+      const h = m[1].trim().toLowerCase();
+      if (h.startsWith('revelation')) current = 'Revelation';
+      else if (h.startsWith('application')) current = 'Application';
+      else if (h.startsWith('background')) current = 'Background';
+      else if (h.startsWith('prophetic')) current = 'Prophetic Declaration';
+      else current = null;
+      continue;
+    }
+    if (current) out[current] += (line + '\n');
+  }
+  for (const k of Object.keys(out)){
+    out[k] = out[k].trim()
+      .replace(/\n{2,}/g,'<br><br>')
+      .replace(/\n/g,'<br>');
+  }
+  return out;
+}
+
+/* ========= Explain ========= */
+$('#explainBtn').onclick = async ()=>{
+  const book=bookSel.value, chapter=chapSel.value, verse=verseSel.value;
+  const obj=verses.find(x=>x.verse==verse); if(!obj) return;
+  const verseText = obj.text;
+  const ctx = verses.filter(v=>Math.abs(v.verse - verse) <= 2).map(v => `${book} ${chapter}:${v.verse} ${v.text}`).join('\n');
+
+  const ref = refKey(book, chapter, verse);
+
+  // If saved, paint
+  if (notesDB[ref]) { paintOutputs(ref); renderNotes(ref); return; }
+
+  // Otherwise fetch
+  $('#revelation').innerHTML = $('#application').innerHTML = $('#background').innerHTML = $('#prophetic').innerHTML = 'Loading…';
+  try{
+    const raw = await callGemini({book, chapter, verse, verseText, contextText: ctx});
+    const s = splitIntoSections(raw);
+    notesDB[ref] = {
+      revelation: s['Revelation'] || '',
+      application: s['Application'] || '',
+      background:  s['Background']  || '',
+      prophetic:   s['Prophetic Declaration'] || '',
+      notes: []
+    };
+    paintOutputs(ref);
+    renderNotes(ref);
+  }catch(e){
+    $('#revelation').innerHTML = 'Error: ' + e.message;
+    $('#application').innerHTML = '';
+    $('#background').innerHTML = '';
+    $('#prophetic').innerHTML = '';
+  }
+};
+</script>
+</body>
+</html>

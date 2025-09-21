@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Saved Verses • Bible Verse Explainer</title>
+<style>
+  :root{
+    --bg:#f7f7f8; --text:#1e1e1e; --card:#fff; --border:#e0e0e0;
+    --muted:#666; --accent:#10a37f; --accent-hover:#0e8f6f; --note-bg:#fafafa;
+    --yellow:#fff176; --col-min:300px;
+  }
+  body{ margin:0; font:15px system-ui; background:var(--bg); color:var(--text) }
+
+  /* Top nav */
+  .topnav{
+    position:sticky; top:0; z-index:5;
+    display:flex; align-items:center; gap:16px;
+    background:var(--card); border-bottom:1px solid var(--border);
+    padding:10px 14px;
+  }
+  .brand{font-weight:800;color:var(--accent)}
+  .navlinks{display:flex; gap:10px}
+  .navlinks a{
+    text-decoration:none; color:#0b6a56; background:#e9f6f2; border:1px solid #cbe9df;
+    padding:6px 10px; border-radius:8px; font-weight:700;
+  }
+  .navlinks a:hover{background:#def1ea}
+
+  /* Layout: left = saved list, right = columns UI */
+  .app {display:grid;grid-template-columns:320px 1fr;gap:12px;min-height:calc(100vh - 50px);padding:12px}
+
+  .panel {
+    background:var(--card); border:1px solid var(--border); border-radius:12px;
+    padding:12px; display:flex; flex-direction:column; min-height:0;
+  }
+
+  /* Left list */
+  .search{display:flex; gap:8px; align-items:center; margin-bottom:8px}
+  .search input{flex:1; padding:10px; border-radius:8px; border:1px solid #d0d0d0; background:#fff}
+  .list{border:1px solid var(--border); border-radius:10px; overflow:auto; flex:1; background:#fff}
+  .row{display:grid; grid-template-columns: 1fr auto; gap:8px; align-items:center;
+       padding:10px 12px; border-bottom:1px solid var(--border); cursor:pointer}
+  .row:last-child{border-bottom:0}
+  .row:hover{background:#f2fbf7}
+  .row.active{background:#def1ea}
+  .ref{font-weight:800}
+  .muted{color:var(--muted); font-size:12px}
+
+  .smallbar{display:flex; gap:8px; margin-top:8px; flex-wrap:wrap}
+  .smallbar button{background:#f0f0f0; color:#333; border:1px solid #ddd; padding:8px 10px; border-radius:8px; cursor:pointer}
+  .smallbar button:hover{background:#e9e9e9}
+
+  /* Right side columns */
+  .columns-wrap {
+    overflow-x:auto; overflow-y:hidden;
+    display:flex; gap:12px; align-items:stretch; padding-bottom:6px;
+    scroll-snap-type:x proximity;
+  }
+  .col {
+    min-width: var(--col-min);
+    display:flex; flex-direction:column; min-height:0;
+    background:var(--card); border:1px solid var(--border); border-radius:12px; padding:12px;
+    scroll-snap-align:start;
+  }
+  .col h2 {margin:0 0 8px 0; color:var(--accent); font-size:16px}
+  .output {
+    flex:1; overflow:auto; padding:10px; border:1px solid #eee; border-radius:8px; background:#fff;
+    max-height: calc(100vh - 240px);
+  }
+  mark.hl { background: var(--yellow); padding:0 .08em; border-radius:2px }
+  mark.hl:hover { outline:1px dashed #f2c200; cursor:pointer }
+
+  /* Notes column */
+  .notes-composer {
+    position: sticky; top: 0; z-index: 1;
+    background:var(--card); padding-bottom:8px; border-bottom:1px solid var(--border);
+    margin-bottom:8px;
+  }
+  #notes-textarea { height: 120px; resize: vertical; width:100% }
+  .notes-list {
+    list-style: none; margin:0; padding:0; border:1px solid #eee; border-radius:8px;
+    background:var(--note-bg); overflow:auto; max-height: calc(100vh - 340px);
+  }
+  .notes-list li {
+    display:flex; gap:8px; align-items:flex-start; padding:10px; border-bottom:1px dashed #e7e7e7;
+  }
+  .notes-list li:last-child { border-bottom:0 }
+  .note-num { font-weight:700; min-width:28px; color:#333 }
+  .note-text { flex:1; white-space:pre-wrap; }
+  .note-actions { display:flex; gap:6px }
+  .btn-x, .btn-edit, .btn-save {
+    background:#f0f0f0; color:#333; border:1px solid #ddd; border-radius:6px; padding:0 8px; height:28px; line-height:26px; cursor:pointer
+  }
+  .btn-x:hover, .btn-edit:hover, .btn-save:hover { background:#e9e9e9 }
+  .edit-input { width:100%; padding:6px 8px; border:1px solid #d0d0d0; border-radius:6px; background:#fff; }
+</style>
+</head>
+<body>
+
+<!-- NAV -->
+<div class="topnav">
+  <div class="brand">Saved Verses</div>
+  <div class="navlinks">
+    <a href="index.html">Home</a>
+    <a href="loadnotes.html">Saved</a>
+  </div>
+</div>
+
+<div class="app">
+  <!-- LEFT: Saved list (picker) -->
+  <section class="panel">
+    <div class="search">
+      <input id="q" type="search" placeholder="Search Book / Chapter / Verse / text…" />
+    </div>
+    <div class="list" id="list"></div>
+    <div class="smallbar">
+      <button id="exportBtn">Export notes.json</button>
+      <button id="importBtn">Import notes.json</button>
+      <input type="file" id="importFile" style="display:none" accept=".json" />
+    </div>
+    <div class="muted" id="foot"></div>
+  </section>
+
+  <!-- RIGHT: columns UI (now includes Verse (KJV) as the FIRST column) -->
+  <section class="columns-wrap">
+    <!-- 0. Verse text -->
+    <div class="col">
+      <h2>Verse (KJV)</h2>
+      <div class="output" id="verseKJV"></div>
+    </div>
+
+    <div class="col">
+      <h2>Revelation</h2>
+      <div class="output" id="revelation"></div>
+    </div>
+
+    <div class="col">
+      <h2>Notes</h2>
+      <div class="notes-composer">
+        <textarea id="notes-textarea" placeholder="Write a note…"></textarea>
+        <button id="notes-add">Add</button>
+      </div>
+      <ol class="notes-list" id="notes-list"></ol>
+    </div>
+
+    <div class="col">
+      <h2>Application</h2>
+      <div class="output" id="application"></div>
+    </div>
+
+    <div class="col">
+      <h2>Background</h2>
+      <div class="output" id="background"></div>
+    </div>
+
+    <div class="col">
+      <h2>Prophetic Declaration</h2>
+      <div class="output" id="prophetic"></div>
+    </div>
+  </section>
+</div>
+
+<script>
+/* ===== Storage / DB ===== */
+const STORAGE_KEY = 'bibleExplainer.notesDB.v1';
+let notesDB = {};
+let currentRef = null;
+
+function saveLocal(){ try{ localStorage.setItem(STORAGE_KEY, JSON.stringify(notesDB)); }catch(_){} }
+function loadLocal(){ try{ const raw=localStorage.getItem(STORAGE_KEY); if(raw){ const obj=JSON.parse(raw); if(obj && typeof obj==='object') notesDB=obj; } }catch(_){} }
+
+/* Try also to merge notes.json if hosted */
+async function tryMergeNotesJSON(){
+  try{
+    const res = await fetch('notes.json', {cache:'no-store'});
+    if(res.ok){
+      const txt = await res.text();
+      const cleaned = (txt.charCodeAt(0)===0xFEFF) ? txt.slice(1) : txt;
+      const data = JSON.parse(cleaned || '{}');
+      if (data && typeof data === 'object'){
+        notesDB = Object.assign({}, notesDB, data);
+        saveLocal();
+      }
+    }
+  }catch(_){}
+}
+
+/* ===== Left list rendering ===== */
+const listEl = document.getElementById('list');
+const qEl    = document.getElementById('q');
+const footEl = document.getElementById('foot');
+
+function renderList(){
+  const query = (qEl.value || '').toLowerCase().trim();
+  const refs = Object.keys(notesDB).sort((a,b)=>a.localeCompare(b));
+  listEl.innerHTML = '';
+  let shown = 0;
+
+  refs.forEach(ref=>{
+    const rec = notesDB[ref] || {};
+    const display = ref.replace(/_/g,' ');
+    const blob = [
+      rec.revelation||'',
+      rec.application||'',
+      rec.background||'',
+      rec.prophetic||'',
+      (rec.notes||[]).join(' ')
+    ].join(' ').toLowerCase();
+    if (query && !display.toLowerCase().includes(query) && !blob.includes(query)) return;
+
+    const row = document.createElement('div');
+    row.className = 'row' + (ref===currentRef ? ' active' : '');
+    row.onclick = ()=> selectRef(ref);
+
+    const left = document.createElement('div');
+    left.className='ref';
+    left.textContent = display;
+
+    const right = document.createElement('div');
+    right.className='muted';
+    const count = Array.isArray(rec.notes) ? rec.notes.length : 0;
+    right.textContent = `${count} note${count===1?'':'s'}`;
+
+    row.appendChild(left);
+    row.appendChild(right);
+    // stash the ref for re-highlighting
+    row.dataset.ref = ref;
+
+    listEl.appendChild(row);
+    shown++;
+  });
+
+  if (!shown){
+    const empty = document.createElement('div');
+    empty.className='row';
+    empty.innerHTML = '<div class="ref">No matches</div><div></div>';
+    listEl.appendChild(empty);
+  }
+  footEl.textContent = `${shown} saved verse${shown===1?'':'s'} listed`;
+}
+qEl.addEventListener('input', renderList);
+
+/* ===== Right side paint + notes ===== */
+const $ = s=>document.querySelector(s);
+function ensureRec(ref){
+  notesDB[ref] = notesDB[ref] || {revelation:'', application:'', background:'', prophetic:'', notes:[], kjvText:''};
+  if (!Array.isArray(notesDB[ref].notes)) notesDB[ref].notes=[];
+}
+
+function paintOutputs(ref){
+  const rec = notesDB[ref]; if(!rec) return;
+  // Verse column
+  $('#verseKJV').innerHTML = rec.kjvText
+    ? rec.kjvText
+    : `<span class="muted">Loading verse…</span>`;
+  // Other columns
+  $('#revelation').innerHTML = rec.revelation || '';
+  $('#application').innerHTML = rec.application || '';
+  $('#background').innerHTML  = rec.background  || '';
+  $('#prophetic').innerHTML   = rec.prophetic   || '';
+  renderNotes(ref);
+}
+
+function saveOutputs(ref){
+  ensureRec(ref);
+  notesDB[ref].revelation = $('#revelation').innerHTML;
+  notesDB[ref].application = $('#application').innerHTML;
+  notesDB[ref].background  = $('#background').innerHTML;
+  notesDB[ref].prophetic   = $('#prophetic').innerHTML;
+  // verseKJV is managed by fetch/cache below
+  saveLocal();
+}
+
+/* ===== Notes UI ===== */
+function renderNotes(ref){
+  ensureRec(ref);
+  const list = $('#notes-list'); list.innerHTML = '';
+  notesDB[ref].notes.forEach((txt, i)=>{
+    const li = document.createElement('li');
+
+    const num = document.createElement('div'); num.className='note-num'; num.textContent = (i+1)+'.';
+    const textDiv = document.createElement('div'); textDiv.className='note-text'; textDiv.textContent = txt;
+
+    const actions = document.createElement('div'); actions.className='note-actions';
+    const editBtn = document.createElement('button'); editBtn.className='btn-edit'; editBtn.textContent='✎';
+    const delBtn  = document.createElement('button'); delBtn.className='btn-x'; delBtn.textContent='×';
+
+    editBtn.onclick = ()=>{
+      const input = document.createElement('input'); input.className='edit-input'; input.value = txt;
+      textDiv.replaceWith(input);
+      editBtn.style.display='none';
+      const saveBtn = document.createElement('button'); saveBtn.className='btn-save'; saveBtn.textContent='Save';
+      actions.insertBefore(saveBtn, delBtn);
+      saveBtn.onclick = ()=>{
+        const v = input.value.trim();
+        notesDB[ref].notes[i] = v;
+        saveLocal();
+        renderNotes(ref);
+      };
+    };
+    delBtn.onclick = ()=>{
+      notesDB[ref].notes.splice(i,1);
+      saveLocal();
+      renderNotes(ref);
+    };
+
+    actions.appendChild(editBtn); actions.appendChild(delBtn);
+    li.appendChild(num); li.appendChild(textDiv); li.appendChild(actions);
+    list.appendChild(li);
+  });
+}
+
+$('#notes-add').onclick = ()=>{
+  if(!currentRef) return;
+  ensureRec(currentRef);
+  const v = ($('#notes-textarea').value || '').trim();
+  if(!v) return;
+  notesDB[currentRef].notes.push(v);
+  $('#notes-textarea').value='';
+  saveLocal();
+  renderNotes(currentRef);
+};
+
+/* ===== Phrase highlighting (click to remove) ===== */
+function enableSelectionHighlight(container){
+  container.addEventListener('mouseup', ()=>{
+    const sel = window.getSelection();
+    if(!sel || sel.isCollapsed) return;
+    const range = sel.getRangeAt(0);
+    let n = range.commonAncestorContainer, ok=false;
+    while (n){ if (n===container){ ok=true; break; } n=n.parentNode; }
+    if (!ok) return;
+    try{
+      const mark = document.createElement('mark'); mark.className='hl';
+      range.surroundContents(mark);
+      mark.addEventListener('click', e=>{
+        e.stopPropagation();
+        const t=document.createTextNode(mark.textContent); mark.replaceWith(t);
+        if(currentRef){ saveOutputs(currentRef); }
+      });
+      sel.removeAllRanges();
+      if(currentRef){ saveOutputs(currentRef); }
+    }catch{
+      const text = sel.toString();
+      if (!text) return;
+      container.innerHTML = container.innerHTML.replace(text, `<mark class="hl">${text}</mark>`);
+      container.querySelectorAll('mark.hl').forEach(m=>{
+        m.addEventListener('click', e=>{
+          e.stopPropagation();
+          const t=document.createTextNode(m.textContent); m.replaceWith(t);
+          if(currentRef){ saveOutputs(currentRef); }
+        });
+      });
+      sel.removeAllRanges();
+      if(currentRef){ saveOutputs(currentRef); }
+    }
+  });
+}
+['#revelation','#application','#background','#prophetic'].forEach(s=>enableSelectionHighlight($(s)));
+
+/* ===== Select a saved ref ===== */
+function parseRef(ref){
+  const m = /^(.+?)_(\d+)_(\d+)$/.exec(ref);
+  if(!m) return null;
+  return { book:m[1], chapter:m[2], verse:m[3] };
+}
+
+async function fetchKJV(ref){
+  ensureRec(ref);
+  if (notesDB[ref].kjvText) return; // cached
+  const p = parseRef(ref); if(!p) return;
+  try{
+    const q = encodeURIComponent(`${p.book} ${p.chapter}`);
+    const r = await fetch(`https://bible-api.com/${q}?translation=kjv`, {cache:'no-store'});
+    const j = await r.json();
+    const vnum = parseInt(p.verse,10);
+    const vObj = (j.verses||[]).find(x=>x.verse===vnum);
+    const text = vObj ? vObj.text : '';
+    notesDB[ref].kjvText = text
+      ? `<div><b>${p.book} ${p.chapter}:${p.verse} (KJV)</b><br>${text}</div>`
+      : `<div><b>${p.book} ${p.chapter}:${p.verse} (KJV)</b><br><span class="muted">Verse not found.</span></div>`;
+    saveLocal();
+    if (ref===currentRef) { document.getElementById('verseKJV').innerHTML = notesDB[ref].kjvText; }
+  }catch(_){
+    document.getElementById('verseKJV').innerHTML = `<span class="muted">Could not load verse.</span>`;
+  }
+}
+
+function selectRef(ref){
+  currentRef = ref;
+  document.querySelectorAll('.row').forEach(r=>{
+    r.classList.toggle('active', r.dataset.ref===ref);
+  });
+  paintOutputs(ref);
+  fetchKJV(ref);
+}
+
+/* ===== Export / Import ===== */
+document.getElementById('exportBtn').onclick = ()=>{
+  // ensure current visible edits are captured
+  if (currentRef) saveOutputs(currentRef);
+  const blob = new Blob([JSON.stringify(notesDB, null, 2)], {type:'application/json'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href = url; a.download = 'notes.json'; a.click();
+  URL.revokeObjectURL(url);
+};
+document.getElementById('importBtn').onclick = ()=> document.getElementById('importFile').click();
+document.getElementById('importFile').onchange = e=>{
+  const f = e.target.files[0]; if(!f) return;
+  const reader = new FileReader();
+  reader.onload = evt=>{
+    try{
+      let raw = evt.target.result;
+      if (raw.charCodeAt(0)===0xFEFF) raw = raw.slice(1);
+      const obj = JSON.parse(raw || '{}');
+      if (!obj || typeof obj !== 'object') throw new Error('Top-level JSON must be an object');
+      // Merge (import overrides existing by key)
+      notesDB = Object.assign({}, notesDB, obj);
+      saveLocal();
+      renderList();
+      if (currentRef && notesDB[currentRef]) paintOutputs(currentRef);
+      alert('Imported!');
+    }catch(err){ alert('Invalid JSON: ' + err.message); }
+  };
+  reader.readAsText(f);
+};
+
+/* ===== Boot ===== */
+loadLocal();
+tryMergeNotesJSON().finally(()=>{
+  renderList();
+  const first = Object.keys(notesDB).sort((a,b)=>a.localeCompare(b))[0];
+  if (first){ selectRef(first); }
+});
+</script>
+</body>
+</html>
